@@ -222,15 +222,17 @@ tsne_tensorflow <-
         sum_Y <- tf$add(tf$square(Y), 1)
         num <- -2.0 * tf$tensordot(Y, tf$matrix_transpose(Y))
         num <- 1.0 / (1.0 + tf$add(tf$matrix_transpose(tf$add(num, sum_Y)), sum_Y))
+        ## FIXME: This is suspect
         num[seq_len(n), seq_len(n)] <- 0.0
-        Q <- num / tf$sum(num)
+        Q <- tf$truediv(num, tf$sum(num))
         Q <- tf$maximum(Q, 1e-12)
 
         ## Compute gradient
         PQ <- P - Q
         
-        for i in range(n) {
-            dY[i, :] <- np.sum(np.tile(PQ[:, i] * num[:, i], (no_dims, 1)).T * (Y[i, :] - Y), 0)
+        ## FIXME: This is suspect
+        for (i in seq_len(n)) {
+            dY[i, ] <- tf$sum(tf$matrix_transpose(tf$tile(PQ[, i] * num[, i], (no_dims, 1))) * (Y[i, ] - Y), 0)
         }
         
         ## Perform the update
@@ -239,28 +241,22 @@ tsne_tensorflow <-
         } else {
             momentum <- final_momentum
         }
-        gains <- (gains + 0.2) * ((dY > 0.) != (iY > 0.)) + (gains * 0.8) * ((dY > 0.) == (iY > 0.))
+        gains <- (gains + 0.2) * ((dY > 0.0) != (iY > 0.0)) + (gains * 0.8) * ((dY > 0.) == (iY > 0.))
         gains[gains < min_gain] <- min_gain
-        iY = momentum * iY - eta * (gains * dY)
-        Y = Y + iY
-        Y = Y - np.tile(np.mean(Y, 0), (n, 1))
+        iY <- momentum * iY - eta * (gains * dY)
+        Y <- Y + iY
+        Y <- Y - tf$tile(tf$reduce_mean(Y, 0), tuple(n, 1L))
 
         # Compute current value of cost function
-        if (iter + 1) % 10 == 0:
-            C = np.sum(P * np.log(P / Q))
-            print("Iteration %d: error is %f" % (iter + 1, C))
-
+        if ((iter + 1) %% 10 == 0) {
+            C <- tf$reduce_sum(P * tf$log(P / Q))
+            sprintf("Iteration %d: error is %f", iter + 1, C)
+        }
         # Stop lying about P-values
-        if iter == 100:
-            P = P / 4.
-
+        if (iter == 100) {
+            P <- P / 4.0
+        }
+        
     # Return solution
     return Y
-    
 }
-    
-
-
-## TODO:
-## 1. Convert dims to tf$shape
-## 2. 
