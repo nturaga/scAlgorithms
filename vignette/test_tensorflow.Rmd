@@ -1,0 +1,331 @@
+---
+title: "Single Cell Tensorflow and BiocSklearn test"
+author: "Nitesh Turaga"
+date: "6/1/2018"
+output: html_document
+---
+
+Use virtualenv which is manually installed, and don't depend on auto
+created `.virtualenv/r-tensorflow` by tensorflow package.
+
+This virtualenv uses python 3.6
+
+```{r use_private_virtualenv}
+library(reticulate)
+use_virtualenv("~/Virtualenvs/p3")
+```
+
+Load `tensorflow` and `BiocSklearn` packages as both python libraries
+are installed in this private virtualenv. The next chunk works only if
+the `use_virtualenv()` function is pointed to the correct path.
+
+```{r load_libraries}
+library(tensorflow)
+library(BiocSklearn)
+library(SingleCellExperiment)
+```
+
+Test successful loading of packages by writing test functions.
+
+**Basics of tensorflow is that first we create a model which is called
+a computational graph with tensorflow objects then we create a
+tensorflow session in which we start running all the computation**.
+
+Speed of computation gains are most when tensorflow is used in GPU
+settings.
+
+
+```{r test_tensorflow}
+matrix1 <- tf$constant(matrix(c(3.0, 3.0), nrow = 1, ncol = 2))
+matrix2 <- tf$constant(matrix(c(3.0, 3.0), nrow = 2, ncol = 1))
+product <- tf$matmul(matrix1, matrix2)
+
+## dimensions
+product$shape
+## name
+product$name
+## tensorflow object type
+product$graph
+
+## Different way of closing session
+with(tf$Session() %as% sess, {
+  result = sess$run(product)
+  print(result)
+})
+
+```
+
+Test BiocSklearn
+
+```{r test_biocsklearn}
+SklearnEls()
+```
+
+
+Other features to manage python virtualenv from within R,
+
+
+```{r echo=TRUE, eval=FALSE}
+## Install python packages
+virtualenv_install("scikit-learn")
+
+## Create new virtualenv under the root
+virtualenv_create(envname)
+
+## virtualenv_root needs to be changed 
+## Virtual environments are by default located at ~/.virtualenvs. You can change this behavior by defining the WORKON_HOME environment variable.
+Sys.setenv("WORKON_HOME = ~/Virtualenvs")
+
+## See function definition
+virtualenv_root
+
+## Function definition from 
+virtualenv_root <- function() {
+  Sys.getenv("WORKON_HOME", unset = "~/.virtualenvs")
+}
+
+
+## List virtual envs (fixed root "~/.virtualenvs")
+virtualenv_list()
+
+## Remove packages installed.
+virtualenv_remove("scikit-learn")
+```
+
+
+Load single Cell data from the Tabula-muris is the dataset
+
+```{bash download_data, echo=TRUE, eval=FALSE}
+## FACS
+wget https://ndownloader.figshare.com/files/10038307
+unzip 10038307
+wget https://ndownloader.figshare.com/files/10038310
+mv 10038310 FACS_metadata.csv
+wget https://ndownloader.figshare.com/files/10039267
+mv 10039267 FACS_annotations.csv
+
+## 10x brain
+wget https://ndownloader.figshare.com/files/10038325
+unzip 10038325
+wget https://ndownloader.figshare.com/files/10038328
+mv 10038328 droplet_metadata.csv
+wget https://ndownloader.figshare.com/files/10039264
+mv 10039264 droplet_annotation.csv
+```
+
+```{r load_data_facs}
+dat = read.delim("FACS/Kidney-counts.csv", sep = ",", header=TRUE)
+
+dat[1:5, 1:5]
+
+# Remove rownames
+rownames(dat) <- dat[,1]
+dat <- dat[,-1]
+
+## Check spike ins
+rownames(dat)[grep("^ERCC-", rownames(dat))]
+
+cellIDs <- colnames(dat)
+cell_info <- strsplit(cellIDs, "\\.")
+Well <- vapply(cell_info, `[`, 1, FUN.VALUE = character(1))
+Plate <- vapply(cell_info, `[`, 2, FUN.VALUE = character(1))
+Mouse <- vapply(cell_info, `[`, 3, FUN.VALUE = character(1))
+
+## Annotation
+ann <- read.table("FACS_annotations.csv", sep = ",", header = TRUE)
+ann <- ann[match(cellIDs, ann[,1]),]
+celltype <- ann[,3]
+
+## Make single cell object
+cell_anns <- data.frame(mouse = Mouse, well = Well, type = celltype)
+rownames(cell_anns) <- colnames(dat)
+facs_sce <- SingleCellExperiment(assays = list(counts = as.matrix(dat)), colData=cell_anns)
+```
+
+Read in 10x data for one tissue type and sample.
+
+```{r sce_object_10x}
+cellbarcodes <- read.table("droplet/Kidney-10X_P4_5/barcodes.tsv")
+genenames <- read.table("droplet/Kidney-10X_P4_5/genes.tsv")
+molecules <- Matrix::readMM("droplet/Kidney-10X_P4_5/matrix.mtx")
+
+head(cellbarcodes)
+head(genenames)
+head(rownames(molecules))
+
+## Give sparse matrix rownames and colnames
+rownames(molecules) <- genenames[,1]
+colnames(molecules) <- paste("10X_P4_5", cellbarcodes[,1], sep = "_")
+```
+
+Get droplet metadata and compare annotation with counts.
+
+```{r droplet_metadata}
+metadata <- read.delim("droplet_metadata.csv", sep = ",", header = TRUE)
+
+head(metadata)
+
+## Get metadata for kidney only
+
+metadata[metadata$channel == "10X_P4_5", ]
+
+mouseID <- "3_8_M"
+
+ann <- read.delim("droplet_annotation.csv", sep=",", header=TRUE)
+head(ann)
+
+## Fix formatting
+ann[,1] <- paste(ann[,1], "-1", sep="")
+ann_subset <- ann[match(colnames(molecules), ann[,1]),]
+celltype <- ann_subset[,3]
+
+## build metadata dataframe
+cell_anns <- data.frame(mouse = rep(mouseID, times=ncol(molecules)), type=celltype)
+
+rownames(cell_anns) <- colnames(molecules)
+
+```
+
+Make a function and read all 10x batches
+
+```{r read_10x_function}
+
+## Function to read in 10x data from droplet folder
+read_10x <-
+    function(droplet_folder)
+{
+    cellbarcodes <- read.table(file.path(droplet_folder, "barcodes.tsv"))
+    genenames <- read.table(file.path(droplet_folder, "genes.tsv"))
+    molecules <- Matrix::readMM(file.path(droplet_folder, "matrix.mtx"))
+    
+    head(cellbarcodes)
+    head(genenames)
+    head(rownames(molecules))
+
+    tissue <- unlist(strsplit(droplet_folder, "-"))[1]
+    code <- unlist(strsplit(droplet_folder, "-"))[2]
+    
+    ## Give sparse matrix rownames and colnames
+    rownames(molecules) <- genenames[,1]
+    colnames(molecules) <- paste(code , cellbarcodes[,1], sep = "_")
+
+    ## metadata
+    metadata <- read.delim("droplet_metadata.csv", sep = ",", header = TRUE)
+    
+    head(metadata)    
+    metadata[metadata$channel == code, ]    
+    mouseID <- "3_8_M"
+
+    ## annotation
+    ann <- read.delim("droplet_annotation.csv", sep=",", header=TRUE)
+    head(ann)
+    
+    ## Fix formatting
+    ann[,1] <- paste(ann[,1], "-1", sep="")
+    ann_subset <- ann[match(colnames(molecules), ann[,1]),]
+    celltype <- ann_subset[,3]
+    
+    ## build metadata dataframe
+    cell_anns <- data.frame(mouse = rep(mouseID, times=ncol(molecules)), type=celltype)
+
+    rownames(cell_anns) <- colnames(molecules)
+    SingleCellExperiment(assays=list(counts = as.matrix(molecules)),
+                         colData=cell_anns)
+}
+
+```
+
+Building a SingleCellExperiemnt object with all kidney cells.
+
+```{r build_sce_object}
+molecules1 <- read_10x(droplet_folder = "droplet/Kidney-10X_P7_5")
+molecules2 <- read_10x(droplet_folder = "droplet/Kidney-10X_P4_6")
+molecules3 <- read_10x(droplet_folder = "droplet/Kidney-10X_P4_5")
+
+## Check if they were read in
+molecules1[1:10, 1:10]
+molecules2[1:10, 1:10]
+
+## Check if rownames are correct
+identical(rownames(molecules1), rownames(molecules2))
+identical(rownames(molecules1), rownames(molecules3))
+
+## Check if there are any repeated cellIDs
+sum(colnames(molecules1) %in% colnames(molecules2))
+sum(colnames(molecules1) %in% colnames(molecules3))
+sum(colnames(molecules2) %in% colnames(molecules3))
+```
+
+Since everything seems ok, we should combine them into one object
+called **all_sce**. This object is saved as `kidney_droplet.rds`.
+
+```{r combine}
+all_sce <- cbind(molecules1, molecules2, molecules3)
+
+saveRDS(all_sce, file="kidney_droplet.rds")
+```
+
+
+NMF with Rpackage  NMF
+
+```{r}
+library(NMF)
+
+V = counts(all_sce)
+
+res <- NMF::nmf(V, 3)
+
+table(rowSums(V) == 0)
+V <- V[rowSums(V) != 0, ] 
+w <- basis(res)
+h <- coef(res)
+
+```
+
+
+NMF with BiocSklearn
+
+```{r}
+X = counts(all_sce)
+
+nmf <- SklearnEls()$skd$NMF
+
+model <- nmf(n_components=3L, init="random", random_state=0L)
+
+W = model$fit_transform(X)
+H = model$components_
+```
+
+
+NMF using tensorflow,
+
+```{r}
+library(tensorflow)
+
+## Matrix to be decomposed
+A <- counts(all_sce)
+
+## show dimensions of A
+dim(A)
+
+A = tf$constant(counts(all_sce))
+shape = A$shape
+shape
+
+#latent factors (we get to choose this)
+rank = 3 
+
+# Initializing random H and W
+temp_H = np.random.randn(rank, shape[1]).astype(np.float32)
+temp_H = np.divide(temp_H, temp_H.max())
+
+temp_W = np.random.randn(shape[0], rank).astype(np.float32)
+temp_W = np.divide(temp_W, temp_W.max())
+
+H =  tf.Variable(temp_H)
+W = tf.Variable(temp_W)
+WH = tf.matmul(W, H)
+```
+
+
+

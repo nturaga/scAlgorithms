@@ -32,3 +32,6 @@ H <- model$components_
 
 pca <- SklearnEls()$skd$PCA
 
+for (i in seq_len(10)) {
+    print(i)
+}

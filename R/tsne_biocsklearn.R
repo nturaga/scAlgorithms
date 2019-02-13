@@ -73,7 +73,11 @@ tsne_BiocSklearn <-
 ## ## Test
 library(BiocSklearn)
 library(scater)
+library(Rtsne)
 sce <- readRDS("data/tsne_sce.Rds")
+
+debug(runTSNE)
+
 runTSNE(sce, n_components=2L)
 
 ## ## Test tsne with small matrix

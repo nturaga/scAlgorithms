@@ -182,7 +182,7 @@ tsne_tensorflow <-
              check_duplicates = FALSE)
 {
     ## Check if tensorflow module is available
-    if !is(tf, "python.builtin.module") {
+    if (!is(tf, "python.builtin.module")) {
         stop("tensorflow module 'tf' not available")
     }
 
@@ -232,7 +232,10 @@ tsne_tensorflow <-
         
         ## FIXME: This is suspect
         for (i in seq_len(n)) {
-            dY[i, ] <- tf$sum(tf$matrix_transpose(tf$tile(PQ[, i] * num[, i], (no_dims, 1))) * (Y[i, ] - Y), 0)
+            dY[i, ] <- tf$sum(
+                              tf$matrix_transpose(
+                                     tf$tile(PQ[, i] * num[, i], (no_dims, 1))
+                                 ) * (Y[i, ] - Y), 0)
         }
         
         ## Perform the update
@@ -247,16 +250,17 @@ tsne_tensorflow <-
         Y <- Y + iY
         Y <- Y - tf$tile(tf$reduce_mean(Y, 0), tuple(n, 1L))
 
-        # Compute current value of cost function
+        ## Compute current value of cost function
         if ((iter + 1) %% 10 == 0) {
             C <- tf$reduce_sum(P * tf$log(P / Q))
             sprintf("Iteration %d: error is %f", iter + 1, C)
         }
-        # Stop lying about P-values
+        ## Stop lying about P-values
         if (iter == 100) {
             P <- P / 4.0
         }
         
-    # Return solution
-    return Y
+        ## Return solution
+        return Y
+    }
 }
